@@ -104,7 +104,7 @@ class SouthSudanFloodDataset(BaseDataset):
             Basin-indexed DataFrame, containing the attributes as columns.
         """
 
-        with open("county_code_static_attributes.csv", "r") as f:
+        with open("/home/jonathan/data/south_sudan/county_code_static_attributes.csv", "r") as f:
             df = pd.read_csv(f)
 
         df = df.set_index("county_code")
