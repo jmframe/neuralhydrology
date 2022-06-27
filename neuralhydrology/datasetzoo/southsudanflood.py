@@ -7,7 +7,7 @@ from neuralhydrology.datasetzoo.basedataset import BaseDataset
 from neuralhydrology.utils.config import Config
 
 
-class SouthSudanFloodDataset(BaseDataset):
+class SouthSudanFlood(BaseDataset):
     """Template class for adding a new data set.
     
     Each dataset class has to derive from `BaseDataset`, which implements most of the logic for preprocessing data and 
@@ -58,7 +58,7 @@ class SouthSudanFloodDataset(BaseDataset):
                  id_to_int: Dict[str, int] = {},
                  scaler: Dict[str, Union[pd.Series, xarray.DataArray]] = {}):
         # initialize parent class
-        super(SouthSudanFloodDataset, self).__init__(cfg=cfg,
+        super(SouthSudanFlood, self).__init__(cfg=cfg,
                                               is_train=is_train,
                                               period=period,
                                               basin=basin,
@@ -86,6 +86,10 @@ class SouthSudanFloodDataset(BaseDataset):
         with open(f"/home/jonathan/data/south_sudan/nh/{basin}.csv", "r") as f:
             df = pd.read_csv(f)
 
+        timestamp_date = [pd.Timestamp(index_date) for index_date in list(df["date"])]
+
+        df["date"] = timestamp_date
+        
         df = df.set_index("date")
 
         df = df.loc[:,['BAS_east', 'sudd_north', 'lakes_south', 'west_slope', 'Grace_SUDD', 'Grace_Upstream_lakes', 'flood_fraction']]
@@ -107,6 +111,14 @@ class SouthSudanFloodDataset(BaseDataset):
         with open("/home/jonathan/data/south_sudan/county_code_static_attributes.csv", "r") as f:
             df = pd.read_csv(f)
 
+        county_code_str = [str(cc) for cc in df.county_code]
+        df["county_code"] = county_code_str
+
         df = df.set_index("county_code")
+   
+        if self.basins:
+            if any(b not in df.index for b in self.basins):
+                raise ValueError('Some basins are missing static attributes.')
+            df = df.loc[self.basins]
 
         return df

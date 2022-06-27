@@ -7,6 +7,7 @@ from neuralhydrology.datasetzoo.camelsus import CamelsUS
 from neuralhydrology.datasetzoo.genericdataset import GenericDataset
 from neuralhydrology.datasetzoo.hourlycamelsus import HourlyCamelsUS
 from neuralhydrology.datasetzoo.lamah import LamaH
+from neuralhydrology.datasetzoo.southsudanflood import SouthSudanFlood
 from neuralhydrology.utils.config import Config
 
 
@@ -60,6 +61,8 @@ def get_dataset(cfg: Config,
     """
     if cfg.dataset.lower() == "camels_us":
         Dataset = CamelsUS
+    elif cfg.dataset.lower() == "ssd":
+        Dataset = SouthSudanFlood
     elif cfg.dataset.lower() == "camels_gb":
         Dataset = CamelsGB
     elif cfg.dataset.lower() == "camels_aus":
