@@ -1,0 +1,29 @@
+name: nh-m3
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - bokeh
+  - h5py
+  - hdf5
+  - jupyter
+  - matplotlib
+  - netcdf4
+  - numba
+  - pandas
+  - pip
+  - pytest
+  - pytest-cov
+  - python=3.10
+  - pytorch
+  - ruamel.yaml
+  - scipy
+  - sphinx
+  - tqdm
+  - xarray
+  - yapf
+  - pip:
+    - tensorboard
+    - sphinx-rtd-theme
+    - nbsphinx
+    - nbsphinx-link

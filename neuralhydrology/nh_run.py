@@ -2,6 +2,7 @@
 import argparse
 import sys
 from pathlib import Path
+import torch
 
 # make sure code directory is in path, even if the package is not installed using the setup.py
 sys.path.append(str(Path(__file__).parent.parent))
@@ -20,6 +21,8 @@ def _get_args() -> dict:
     parser.add_argument('--period', type=str, choices=["train", "validation", "test"], default="test")
     parser.add_argument('--gpu', type=int,
                         help="GPU id to use. Overrides config argument 'device'. Use a value < 0 for CPU.")
+    parser.add_argument('--device', type=str, choices=["cpu", "cuda", "mps"], 
+                        help="Device to use for training/evaluation: 'cpu', 'cuda', or 'mps'.")
     args = vars(parser.parse_args())
 
     if (args["mode"] in ["train", "finetune"]) and (args["config_file"] is None):
@@ -33,6 +36,56 @@ def _get_args() -> dict:
 
     return args
 
+def _resolve_device(config_device: str, gpu: int = None, cli_device: str = None) -> str:
+    """
+    Resolve the device to use based on CLI device, GPU option, and config file.
+
+    Parameters
+    ----------
+    config_device : str
+        Device specified in the config file ('cuda', 'mps', or 'cpu').
+    gpu : int, optional
+        GPU id from command-line arguments. Overrides config file.
+    cli_device : str, optional
+        Device specified via the --device argument. Highest priority.
+
+    Returns
+    -------
+    str
+        Device string to use ('cuda:X', 'mps', or 'cpu').
+    """
+    # CLI --device takes the highest priority
+    if cli_device:
+        if cli_device == "mps" and torch.backends.mps.is_available():
+            return "mps"
+        elif cli_device.startswith("cuda") and torch.cuda.is_available():
+            return cli_device
+        elif cli_device == "cpu":
+            return "cpu"
+
+    # GPU argument (fallback when --device not specified)
+    if gpu is not None:
+        if gpu >= 0 and torch.cuda.is_available():
+            return f"cuda:{gpu}"
+        elif gpu < 0:
+            return "cpu"
+
+    # Fallback to config file device
+    if config_device:
+        if config_device.lower() == "mps" and torch.backends.mps.is_available():
+            return "mps"
+        elif config_device.lower().startswith("cuda") and torch.cuda.is_available():
+            return config_device
+        elif config_device.lower() == "cpu":
+            return "cpu"
+
+    # Automatic fallback
+    if torch.backends.mps.is_available():
+        return "mps"
+    elif torch.cuda.is_available():
+        return "cuda"
+    else:
+        return "cpu"
 
 def _main():
     args = _get_args()
@@ -40,20 +93,21 @@ def _main():
         setup_logging(str(Path(args["run_dir"]) / "output.log"))
 
     if args["mode"] == "train":
-        start_run(config_file=Path(args["config_file"]), gpu=args["gpu"])
+        start_run(config_file=Path(args["config_file"]), gpu=args["gpu"], device=args["device"])
     elif args["mode"] == "continue_training":
         continue_run(run_dir=Path(args["run_dir"]),
                      config_file=Path(args["config_file"]) if args["config_file"] is not None else None,
-                     gpu=args["gpu"])
+                     gpu=args["gpu"], device=args["device"])
     elif args["mode"] == "finetune":
-        finetune(config_file=Path(args["config_file"]), gpu=args["gpu"])
+        finetune(config_file=Path(args["config_file"]), gpu=args["gpu"], device=args["device"])
     elif args["mode"] == "evaluate":
-        eval_run(run_dir=Path(args["run_dir"]), period=args["period"], epoch=args["epoch"], gpu=args["gpu"])
+        eval_run(run_dir=Path(args["run_dir"]), period=args["period"], epoch=args["epoch"],
+                 gpu=args["gpu"], device=args["device"])
     else:
         raise RuntimeError(f"Unknown mode {args['mode']}")
 
 
-def start_run(config_file: Path, gpu: int = None):
+def start_run(config_file: Path, gpu: int = None, device: str = None):
     """Start training a model.
     
     Parameters
@@ -66,17 +120,12 @@ def start_run(config_file: Path, gpu: int = None):
     """
 
     config = Config(config_file)
-
-    # check if a GPU has been specified as command line argument. If yes, overwrite config
-    if gpu is not None and gpu >= 0:
-        config.device = f"cuda:{gpu}"
-    if gpu is not None and gpu < 0:
-        config.device = "cpu"
-
+    config.device = _resolve_device(config_device=config.device, gpu=gpu, cli_device=device)
+    print(f"Using device: {config.device}")
     start_training(config)
 
 
-def continue_run(run_dir: Path, config_file: Path = None, gpu: int = None):
+def continue_run(run_dir: Path, config_file: Path = None, gpu: int = None, device: str = None):
     """Continue model training.
     
     Parameters
@@ -98,15 +147,12 @@ def continue_run(run_dir: Path, config_file: Path = None, gpu: int = None):
     base_config.is_continue_training = True
 
     # check if a GPU has been specified as command line argument. If yes, overwrite config
-    if gpu is not None and gpu >= 0:
-        base_config.device = f"cuda:{gpu}"
-    if gpu is not None and gpu < 0:
-        base_config.device = "cpu"
+    base_config.device = _resolve_device(config_device=base_config.device, gpu=gpu, cli_device=device)
 
     start_training(base_config)
 
 
-def finetune(config_file: Path = None, gpu: int = None):
+def finetune(config_file: Path = None, gpu: int = None, device: str = None):
     """Finetune a pre-trained model.
 
     Parameters
@@ -135,15 +181,12 @@ def finetune(config_file: Path = None, gpu: int = None):
     config.is_continue_training = False
 
     # check if a GPU has been specified as command line argument. If yes, overwrite config
-    if gpu is not None and gpu >= 0:
-        config.device = f"cuda:{gpu}"
-    if gpu is not None and gpu < 0:
-        config.device = "cpu"
+    config.device = _resolve_device(config_device=config.device, gpu=gpu, cli_device=device)
 
     start_training(config)
 
 
-def eval_run(run_dir: Path, period: str, epoch: int = None, gpu: int = None):
+def eval_run(run_dir: Path, period: str, epoch: int = None, gpu: int = None, device: str = None):
     """Start evaluating a trained model.
     
     Parameters
@@ -160,11 +203,7 @@ def eval_run(run_dir: Path, period: str, epoch: int = None, gpu: int = None):
     """
     config = Config(run_dir / "config.yml")
 
-    # check if a GPU has been specified as command line argument. If yes, overwrite config
-    if gpu is not None and gpu >= 0:
-        config.device = f"cuda:{gpu}"
-    if gpu is not None and gpu < 0:
-        config.device = "cpu"
+    config.device = _resolve_device(config_device=config.device, gpu=gpu, cli_device=device)
 
     start_evaluation(cfg=config, run_dir=run_dir, epoch=epoch, period=period)
 
