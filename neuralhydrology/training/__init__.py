@@ -56,6 +56,8 @@ def get_loss_obj(cfg: Config) -> loss.BaseLoss:
     """
     if cfg.loss.lower() == "mse":
         loss_obj = loss.MaskedMSELoss(cfg)
+    elif cfg.loss.lower() == "fdc":
+        loss_obj = loss.MaskedFDCLoss(cfg)
     elif cfg.loss.lower() == "nse":
         loss_obj = loss.MaskedNSELoss(cfg)
     elif cfg.loss.lower() == "weightednse":

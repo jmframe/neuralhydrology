@@ -1,4 +1,4 @@
-name: neuralhydrology
+name: nh_cpu
 channels:
   - pytorch
   - defaults

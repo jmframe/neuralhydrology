@@ -1,6 +1,6 @@
 from collections import defaultdict
 from typing import Dict, List, Tuple
-
+from scipy.signal import find_peaks
 import numpy as np
 import torch
 
@@ -171,6 +171,71 @@ class BaseLoss(torch.nn.Module):
         """
         self._regularization_terms = regularization_modules
 
+
+class MaskedFDCLoss(BaseLoss):
+    """Flow Duration Curve (FDC) Divergence Loss with Mass Balance Term.
+
+    This loss computes the divergence between observed and predicted flow duration curves (FDCs),
+    normalized by the maximum observed value, and incorporates a mass balance term.
+
+    Parameters
+    ----------
+    cfg : Config
+        The run configuration.
+    """
+
+    def __init__(self, cfg: Config):
+        super(MaskedFDCLoss, self).__init__(cfg, prediction_keys=['y_hat'], ground_truth_keys=['y'])
+
+    def _get_loss(self, prediction: Dict[str, torch.Tensor], ground_truth: Dict[str, torch.Tensor], **kwargs):
+        """
+        Calculate FDC divergence loss with a mass balance term.
+
+        Parameters
+        ----------
+        prediction : Dict[str, torch.Tensor]
+            Predicted discharge values with key 'y_hat'.
+        ground_truth : Dict[str, torch.Tensor]
+            Observed discharge values with key 'y'.
+
+        Returns
+        -------
+        torch.Tensor
+            The combined FDC divergence and mass balance loss.
+        """
+        # Mask NaN values
+        mask = ~torch.isnan(ground_truth['y'])
+        y_pred = prediction['y_hat'][mask].flatten()
+        y_obs = ground_truth['y'][mask].flatten()
+
+        # Sort values in descending order to construct FDCs
+        y_pred_sorted, _ = torch.sort(y_pred, descending=True)
+        y_obs_sorted, _ = torch.sort(y_obs, descending=True)
+
+        # Ensure both FDCs have the same length by trimming
+        min_len = min(len(y_pred_sorted), len(y_obs_sorted))
+        y_pred_sorted = y_pred_sorted[:min_len]
+        y_obs_sorted = y_obs_sorted[:min_len]
+
+        # Compute cross-distribution variability: E[|y - w|]
+        cross_diff = torch.abs(y_obs_sorted[:, None] - y_pred_sorted[None, :])
+        cross_variability = cross_diff.mean()
+
+        # Compute within-distribution variability for y: E[|y - y*|]
+        within_diff_y = torch.abs(y_obs_sorted[:, None] - y_obs_sorted[None, :])
+        within_variability_obs = within_diff_y.mean()
+
+        # Compute within-distribution variability for w: E[|w - w*|]
+        within_diff_w = torch.abs(y_pred_sorted[:, None] - y_pred_sorted[None, :])
+        within_variability_pred = within_diff_w.mean()
+
+        # Compute FDC divergence
+        fdc_divergence = cross_variability - 0.5 * (within_variability_obs + within_variability_pred)
+
+        # Ensure non-negative divergence
+        fdc_loss = torch.clamp(fdc_divergence, min=0.0)
+
+        return fdc_loss
 
 class MaskedMSELoss(BaseLoss):
     """Mean squared error loss.

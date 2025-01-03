@@ -22,7 +22,7 @@ def get_available_metrics() -> List[str]:
     """
     metrics = [
         "NSE", "MSE", "RMSE", "KGE", "Alpha-NSE", "Pearson-r", "Beta-KGE", "Beta-NSE", "FHV", "FMS", "FLV",
-        "Peak-Timing", "Missed-Peaks", "Peak-MAPE"
+        "FDC-Divergence", "Peak-Timing", "Missed-Peaks", "Peak-MAPE"
     ]
     return metrics
 
@@ -415,6 +415,49 @@ def fdc_fms(obs: DataArray, sim: DataArray, lower: float = 0.2, upper: float = 0
 
     return fms * 100
 
+def fdc_divergence(obs: DataArray, sim: DataArray) -> float:
+    r"""Calculate the divergence between the full flow duration curves of observations and simulations.
+    
+    .. math:: 
+        \text{FDC-Divergence} = \frac{1}{N} \sum_{i=1}^N |Q_{s,i} - Q_{o,i}|,
+    
+    where :math:`Q_s` are the simulated sorted discharges (here, `sim`), :math:`Q_o` are the observed sorted discharges 
+    (here, `obs`), and `N` is the number of data points.
+    
+    Parameters
+    ----------
+    obs : DataArray
+        Observed time series.
+    sim : DataArray
+        Simulated time series.
+        
+    Returns
+    -------
+    float
+        Absolute divergence between observed and simulated flow duration curves.
+    """
+    # Verify inputs
+    _validate_inputs(obs, sim)
+
+    # Get time series with only valid observations
+    obs, sim = _mask_valid(obs, sim)
+
+    if len(obs) < 1:
+        return np.nan
+
+    # Sort the observed and simulated data to get FDCs
+    obs_fdc = _get_fdc(obs)
+    sim_fdc = _get_fdc(sim)
+
+    # Ensure they have the same length
+    min_length = min(len(obs_fdc), len(sim_fdc))
+    obs_fdc = obs_fdc[:min_length]
+    sim_fdc = sim_fdc[:min_length]
+
+    # Calculate the absolute divergence
+    divergence = np.mean(np.abs(sim_fdc - obs_fdc))
+
+    return float(divergence)
 
 def fdc_fhv(obs: DataArray, sim: DataArray, h: float = 0.02) -> float:
     r"""Calculate the peak flow bias of the flow duration curve [#]_
@@ -862,6 +905,8 @@ def calculate_metrics(obs: DataArray,
             values["FMS"] = fdc_fms(obs, sim)
         elif metric.lower() == "flv":
             values["FLV"] = fdc_flv(obs, sim)
+        elif metric.lower() == "fdc":
+            values["FDC-Divergence"] = fdc_divergence(obs, sim)
         elif metric.lower() == "peak-timing":
             values["Peak-Timing"] = mean_peak_timing(obs, sim, resolution=resolution, datetime_coord=datetime_coord)
         elif metric.lower() == "missed-peaks":
