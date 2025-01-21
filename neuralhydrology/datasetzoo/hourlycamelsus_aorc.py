@@ -181,12 +181,10 @@ def load_hourly_us_forcings(data_dir: Path, basin: str, forcings: str) -> pd.Dat
     pd.DataFrame
         Time-indexed DataFrame, containing the forcing data.
     """
-    # Determine the path to the forcing data
     forcing_path = data_dir / 'hourly' / forcings
     if not forcing_path.is_dir():
         raise OSError(f"{forcing_path} does not exist")
 
-    # Search for the file corresponding to the basin
     files = list(forcing_path.glob('*.csv'))
     file_path = [f for f in files if basin in f.stem]
     if file_path:
@@ -194,18 +192,7 @@ def load_hourly_us_forcings(data_dir: Path, basin: str, forcings: str) -> pd.Dat
     else:
         raise FileNotFoundError(f'No file for Basin {basin} at {forcing_path}')
 
-    # Handle different header types for NLDAS and AORC
-    if forcings == 'nldas_hourly':
-        df = pd.read_csv(file_path, index_col=['date'], parse_dates=['date'])
-        df.rename(columns={'date': 'date'}, inplace=True)
-    elif forcings == 'aorc_hourly':
-        df = pd.read_csv(file_path, index_col='time', parse_dates=['time'])
-        df.index = df.index.floor('s')  # Adjust precision to seconds
-        df.index.rename('date', inplace=True)  # Rename 'time' to 'date'
-    else:
-        raise ValueError(f"Unknown forcing type: {forcings}")
-
-    return df
+    return pd.read_csv(file_path, index_col=['date'], parse_dates=['date'])
 
 
 def load_hourly_us_discharge(data_dir: Path, basin: str) -> pd.DataFrame:
