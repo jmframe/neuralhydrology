@@ -237,6 +237,70 @@ class MaskedFDCLoss(BaseLoss):
 
         return fdc_loss
 
+class MaskedSpatialVariogramLoss(BaseLoss):
+    """
+    Spatial Variogram-based Loss Function for Multisite Streamflow Predictions.
+
+    This loss ensures that the **spatial structure** in observed streamflow is preserved in the predictions.
+    Specifically, the pairwise differences between sites in the predictions should match those in the observations.
+
+    Parameters
+    ----------
+    cfg : Config
+        The run configuration.
+    v_order : int, optional (default=2)
+        Order of the variogram (typically 2 for semi-variance).
+    distance_matrix : Optional[torch.Tensor], shape (sites, sites)
+        A predefined distance matrix (optional). If provided, closer sites are 
+        weighted more heavily in the loss calculation.
+    """
+
+    def __init__(self, cfg, v_order=2, distance_matrix: torch.Tensor = None):
+        super(MaskedSpatialVariogramLoss, self).__init__(
+            cfg, prediction_keys=['y_hat'], ground_truth_keys=['y']
+        )
+        self.v_order = v_order  # Power used in variogram (default: 2 for semi-variance)
+        self.distance_matrix = distance_matrix  # Optional weighting for site relationships
+
+    def _get_loss(self, prediction: Dict[str, torch.Tensor], ground_truth: Dict[str, torch.Tensor], **kwargs):
+        """
+        Compute the spatial variogram loss.
+
+        Parameters
+        ----------
+        prediction : Dict[str, torch.Tensor]
+            Predicted discharge values with key 'y_hat' (shape: [batch, sites]).
+        ground_truth : Dict[str, torch.Tensor]
+            Observed discharge values with key 'y' (shape: [batch, sites]).
+
+        Returns
+        -------
+        torch.Tensor
+            The variogram-based loss.
+        """
+        # Mask NaN values
+        mask = ~torch.isnan(ground_truth['y'])
+        y_pred = prediction['y_hat'][mask].reshape(-1, prediction['y_hat'].shape[-1])  # (batch, sites)
+        y_obs = ground_truth['y'][mask].reshape(-1, ground_truth['y'].shape[-1])  # (batch, sites)
+
+        # Compute pairwise differences |yi - yj|^v_order for observed values (spatial differences)
+        diff_obs = torch.abs(y_obs[:, :, None] - y_obs[:, None, :]) ** self.v_order  # (batch, sites, sites)
+
+        # Compute pairwise differences |ŷi - ŷj|^v_order for predicted values (spatial differences)
+        diff_pred = torch.abs(y_pred[:, :, None] - y_pred[:, None, :]) ** self.v_order  # (batch, sites, sites)
+
+        # Compute raw variogram loss (mean squared difference)
+        loss_matrix = (diff_obs - diff_pred) ** 2  # (batch, sites, sites)
+
+        # Apply optional distance-based weighting
+        if self.distance_matrix is not None:
+            loss_matrix = loss_matrix * self.distance_matrix  # Weight differences based on site relationships
+
+        # Compute final loss (mean over all site pairs and batches)
+        variogram_loss = torch.mean(loss_matrix)
+
+        return variogram_loss
+
 class MaskedMSELoss(BaseLoss):
     """Mean squared error loss.
 
