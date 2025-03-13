@@ -416,13 +416,13 @@ def fdc_fms(obs: DataArray, sim: DataArray, lower: float = 0.2, upper: float = 0
     return fms * 100
 
 def fdc_divergence(obs: DataArray, sim: DataArray) -> float:
-    r"""Calculate the divergence between the full flow duration curves of observations and simulations.
+    r"""Calculate the FDC divergence between observations and simulations using pairwise variability.
     
     .. math:: 
-        \text{FDC-Divergence} = \frac{1}{N} \sum_{i=1}^N |Q_{s,i} - Q_{o,i}|,
+        d_{\text{FDC}}(P, Q) = \mathbb{E}[|y - \omega|] - \frac{1}{2} \left(\mathbb{E}[|y - y^*|] + \mathbb{E}[|\omega - \omega^*|]\right),
     
-    where :math:`Q_s` are the simulated sorted discharges (here, `sim`), :math:`Q_o` are the observed sorted discharges 
-    (here, `obs`), and `N` is the number of data points.
+    where :math:`y` are the sorted observed discharges (here, `obs`), :math:`\omega` are the sorted simulated discharges
+    (here, `sim`), and the expectations are computed over pairwise differences within and between distributions.
     
     Parameters
     ----------
@@ -434,7 +434,7 @@ def fdc_divergence(obs: DataArray, sim: DataArray) -> float:
     Returns
     -------
     float
-        Absolute divergence between observed and simulated flow duration curves.
+        FDC divergence between observed and simulated flow duration curves.
     """
     # Verify inputs
     _validate_inputs(obs, sim)
@@ -454,10 +454,24 @@ def fdc_divergence(obs: DataArray, sim: DataArray) -> float:
     obs_fdc = obs_fdc[:min_length]
     sim_fdc = sim_fdc[:min_length]
 
-    # Calculate the absolute divergence
-    divergence = np.mean(np.abs(sim_fdc - obs_fdc))
+    # Convert to numpy arrays for efficient pairwise operations
+    obs_fdc = np.array(obs_fdc)
+    sim_fdc = np.array(sim_fdc)
 
-    return float(divergence)
+    # Calculate cross-distribution variability: E[|y - ω|]
+    cross_variability = np.mean(np.abs(obs_fdc[:, None] - sim_fdc[None, :]))
+
+    # Calculate within-distribution variability: E[|y - y*|] and E[|ω - ω*|]
+    within_variability_obs = np.mean(np.abs(obs_fdc[:, None] - obs_fdc[None, :]))
+    within_variability_sim = np.mean(np.abs(sim_fdc[:, None] - sim_fdc[None, :]))
+
+    # Compute FDC divergence
+    fdc_divergence = cross_variability - 0.5 * (within_variability_obs + within_variability_sim)
+
+    # Ensure non-negative divergence
+    fdc_divergence = max(fdc_divergence, 0.0)
+
+    return float(fdc_divergence)
 
 def fdc_fhv(obs: DataArray, sim: DataArray, h: float = 0.02) -> float:
     r"""Calculate the peak flow bias of the flow duration curve [#]_

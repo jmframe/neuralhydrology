@@ -1,0 +1,57 @@
+batch_size: 256
+clip_gradient_norm: 1
+clip_targets_to_zero:
+- QObs(mm/d)
+data_dir: /Users/jmframe/data/CAMELS_US/
+dataset: camels_us
+device: cuda:0
+dynamic_inputs:
+- PRCP(mm/day)_nldas
+- PRCP(mm/day)_maurer
+- prcp(mm/day)_daymet
+- srad(W/m2)_daymet
+- tmax(C)_daymet
+- tmin(C)_daymet
+- vp(Pa)_daymet
+epochs: 20
+experiment_name: leaf_xxx
+forcings:
+- maurer
+- daymet
+- nldas
+head: regression
+hidden_size: 20
+initial_forget_bias: 3
+learning_rate:
+  0: 1e-2
+  5: 5e-3
+  10: 1e-3
+log_interval: 5
+log_n_figures: 1
+log_tensorboard: false
+loss: MSE
+metrics:
+- FDC
+- KGE
+model: cudalstm
+num_workers: 8
+optimizer: Adam
+output_activation: linear
+output_dropout: 0.4
+predict_last_n: 1
+save_weights_every: 1
+seed: 999
+seq_length: 365
+target_variables:
+- QObs(mm/d)
+test_basin_file: leaf.txt
+test_end_date: 30/09/2014
+test_start_date: 01/10/1980
+train_basin_file: leaf.txt
+train_end_date: 30/09/2008
+train_start_date: 01/10/1999
+validate_every: 1
+validate_n_random_basins: 1
+validation_basin_file: leaf.txt
+validation_end_date: 30/09/1989
+validation_start_date: 01/10/1980
