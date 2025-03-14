@@ -255,12 +255,12 @@ class MaskedSpatialVariogramLoss(BaseLoss):
         weighted more heavily in the loss calculation.
     """
 
-    def __init__(self, cfg, v_order=2, distance_matrix: torch.Tensor = None):
+    def __init__(self, cfg, v_order=2):
         super(MaskedSpatialVariogramLoss, self).__init__(
             cfg, prediction_keys=['y_hat'], ground_truth_keys=['y']
         )
         self.v_order = v_order  # Power used in variogram (default: 2 for semi-variance)
-        self.distance_matrix = distance_matrix  # Optional weighting for site relationships
+        self.distance_matrix = torch.tensor(cfg.distance_matrix.values, dtype=torch.float32)  # Optional weighting for site relationships
 
     def _get_loss(self, prediction: Dict[str, torch.Tensor], ground_truth: Dict[str, torch.Tensor], **kwargs):
         """
@@ -278,6 +278,8 @@ class MaskedSpatialVariogramLoss(BaseLoss):
         torch.Tensor
             The variogram-based loss.
         """
+        self.distance_matrix = self.distance_matrix.to(ground_truth['y'].device)
+
         # Mask NaN values
         mask = ~torch.isnan(ground_truth['y'])
         y_pred = prediction['y_hat'][mask].reshape(-1, prediction['y_hat'].shape[-1])  # (batch, sites)
@@ -293,14 +295,13 @@ class MaskedSpatialVariogramLoss(BaseLoss):
         loss_matrix = (diff_obs - diff_pred) ** 2  # (batch, sites, sites)
 
         # Apply optional distance-based weighting
-        if self.distance_matrix is not None:
-            loss_matrix = loss_matrix * self.distance_matrix  # Weight differences based on site relationships
+        loss_matrix = loss_matrix * self.distance_matrix  # Weight differences based on site relationships
 
         # Compute final loss (mean over all site pairs and batches)
         variogram_loss = torch.mean(loss_matrix)
 
         return variogram_loss
-
+        
 class MaskedMSELoss(BaseLoss):
     """Mean squared error loss.
 

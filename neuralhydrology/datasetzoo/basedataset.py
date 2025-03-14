@@ -17,14 +17,53 @@ from numba import njit, prange
 from ruamel.yaml import YAML
 from torch.utils.data import Dataset
 from tqdm import tqdm
-
+from random import random
 from neuralhydrology.datautils import utils
 from neuralhydrology.utils.config import Config
 from neuralhydrology.utils.errors import NoTrainDataError, NoEvaluationDataError
 from neuralhydrology.utils import samplingutils
 
+from geopy.distance import geodesic
+from scipy.spatial.distance import pdist, squareform
+
 LOGGER = logging.getLogger(__name__)
 
+def _compute_distance_matrix(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute pairwise geodesic distances between basins based on latitude and longitude,
+    then apply a Gaussian weighting so that closer sites have higher weights.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing latitude ('gauge_lat') and longitude ('gauge_lon') of each basin.
+
+    Returns
+    -------
+    pd.DataFrame
+        Gaussian-weighted distance matrix (sites x sites), where closer sites have higher weights.
+    """
+    # Extract lat/lon as numpy array
+    latlon = df[['gauge_lat', 'gauge_lon']].to_numpy()
+
+    # Compute pairwise geodesic distances (Haversine formula using `geodesic`)
+    distance_matrix = squareform(pdist(latlon, metric=lambda u, v: geodesic(u, v).kilometers))
+
+    # Convert to pandas DataFrame (index and columns are basin IDs)
+    distance_df = pd.DataFrame(distance_matrix, index=df.index, columns=df.index)
+
+    # **Apply Gaussian Kernel Before Normalization**
+    sigma = np.median(distance_df.values) # Adaptive sigma based on dataset scale
+    weight_matrix = np.exp(-distance_df**2 / (2 * sigma**2))  # Smooth decay
+
+    # **Optional: Normalize Weights (Ensures range [0,1])**
+    min_val = weight_matrix.min().min()
+    max_val = weight_matrix.max().max()
+
+    if max_val - min_val > 0:
+        weight_matrix = (weight_matrix - min_val) / (max_val - min_val + 1e-8)
+
+    return pd.DataFrame(weight_matrix, index=df.index, columns=df.index)
 
 class BaseDataset(Dataset):
     """Base data set class to load and preprocess data.
@@ -664,6 +703,11 @@ class BaseDataset(Dataset):
         # load dataset specific attributes from the subclass
         if self.cfg.static_attributes:
             df = self._load_attributes()
+
+            # Compute the distance matrix
+            self.cfg.distance_matrix = _compute_distance_matrix(df)
+            print(f"Distance matrix has shape {self.cfg.distance_matrix.shape}, here is a sample:")
+            print(self.cfg.distance_matrix)
 
             # remove all attributes not defined in the config
             missing_attrs = [attr for attr in self.cfg.static_attributes if attr not in df.columns]

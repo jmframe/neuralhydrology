@@ -282,7 +282,11 @@ class Config(object):
     @property
     def batch_size(self) -> int:
         return self._get_value_verbose("batch_size")
-
+    
+    @property
+    def batch_sites(self) -> int:
+        return self._get_value_verbose("batch_sites")
+    
     @property
     def bidirectional_stacked_forecast_lstm(self) -> bool:
         return self._cfg.get("bidirectional_stacked_forecast_lstm", False)
