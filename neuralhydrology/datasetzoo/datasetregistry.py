@@ -38,7 +38,7 @@ class DatasetRegistry:
         if not issubclass(new_class, BaseDataset):
             raise TypeError(f"Class {type(new_class)} is not a subclass of BaseDataset.")
         self.__dataset_class[key] = new_class
-        print(f"Dataset class '{key}' successfully added.")
+#        print(f"Dataset class '{key}' successfully added.")
             
 
     def instantiate_dataset(self,
