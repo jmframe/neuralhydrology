@@ -172,6 +172,237 @@ class BaseLoss(torch.nn.Module):
         self._regularization_terms = regularization_modules
 
 
+class MaskedLimbLoss(BaseLoss):
+    """
+    Computes a loss based on the divergence between the distributions of the
+    raising and falling limb slopes of the predicted and observed hydrographs,
+    calculated over non-overlapping intervals.
+    """
+    def __init__(self, cfg: Config):
+        # If you have a custom base class, you can inherit from it.
+        super(MaskedLimbLoss, self).__init__(
+            cfg, prediction_keys=['y_hat'], ground_truth_keys=['y']
+        )
+        # The interval is interpreted as an integer stride
+        self.stride = int(cfg.rasing_falling_interval)
+        if self.stride <= 0:
+            raise ValueError("Rasing_Falling_interval (stride) must be a positive integer.")
+
+    def _get_loss(self, prediction: Dict[str, torch.Tensor], ground_truth: Dict[str, torch.Tensor], **kwargs):
+        """
+        Calculate loss based on the divergence of hydrograph slopes.
+
+        Parameters
+        ----------
+        prediction : Dict[str, torch.Tensor]
+            Predicted discharge values with key 'y_hat'.
+        ground_truth : Dict[str, torch.Tensor]
+            Observed discharge values with key 'y'.
+
+        Returns
+        -------
+        torch.Tensor
+            The divergence loss based on hydrograph limbs.
+        """
+        # Mask NaN values and flatten to get 1D tensors of valid data
+        mask = ~torch.isnan(ground_truth['y'])
+        y_pred = prediction['y_hat'][mask]
+        y_obs = ground_truth['y'][mask]
+        
+        # Ensure there are enough data points to compute at least one difference
+        if y_obs.numel() <= self.stride:
+            return torch.tensor(0.0, device=y_obs.device, requires_grad=True)
+        if torch.rand(1)< 0.70:
+        # --- Calculate Slopes over Non-Overlapping Intervals ---
+        
+            # Select data points for the start of each interval: [y[0], y[stride], y[2*stride], ...]
+            y_obs_curr = y_obs[::self.stride]
+            y_pred_curr = y_pred[::self.stride]
+
+            # Select data points for the end of each interval: [y[stride], y[2*stride], y[3*stride], ...]
+            y_obs_next = y_obs[self.stride::self.stride]
+            y_pred_next = y_pred[self.stride::self.stride]
+            
+            # Trim tensors to the same length to ensure we have pairs for subtraction
+            min_len = min(y_obs_curr.numel(), y_obs_next.numel())
+            
+            y_obs_curr, y_obs_next = y_obs_curr[:min_len], y_obs_next[:min_len]
+            y_pred_curr, y_pred_next = y_pred_curr[:min_len], y_pred_next[:min_len]
+
+            # The divisor is the stride value itself, as per your example (e.g., / 2)
+            divisor = float(self.stride)
+
+            # Compute the rate of change (slope) over the non-overlapping intervals
+            obs_slopes = (y_obs_next - y_obs_curr) / divisor
+            pred_slopes = (y_pred_next - y_pred_curr) / divisor
+
+            # --- Compute Divergence on Slope Distributions ---
+            # Calculate the mean of observed values for each interval
+            obs_interval_means = (y_obs_curr + y_obs_next) / 2.0
+            # Calculate the mean of predicted values for each interval
+            pred_interval_means = (y_pred_curr + y_pred_next) / 2.0        # Calculate the mean of observed values for each interval
+            # Multiply the observed slopes by their corresponding observed interval means
+            obs_slopes = obs_slopes * obs_interval_means
+            # Multiply the predicted slopes by their corresponding predicted interval means
+            pred_slopes = pred_slopes * pred_interval_means        
+            # Sort the calculated slopes to create a distribution for each
+            pred_slopes_sorted, _ = torch.sort(pred_slopes, descending=True)
+            obs_slopes_sorted, _ = torch.sort(obs_slopes, descending=True)
+            
+            y_pred_dist = pred_slopes_sorted
+            y_obs_dist = obs_slopes_sorted
+
+            # The rest of the divergence calculation is identical to the original logic
+            cross_diff = torch.abs(y_obs_dist[:, None] - y_pred_dist[None, :])
+            cross_variability = cross_diff.mean()
+
+            within_diff_y = torch.abs(y_obs_dist[:, None] - y_obs_dist[None, :])
+            within_variability_obs = within_diff_y.mean()
+
+            within_diff_w = torch.abs(y_pred_dist[:, None] - y_pred_dist[None, :])
+            within_variability_pred = within_diff_w.mean()
+
+            limb_divergence = cross_variability - 0.5 * (within_variability_obs + within_variability_pred)
+            limb_loss = torch.clamp(limb_divergence, min=0.0)
+        else:
+            mse_loss_fn = torch.nn.MSELoss(reduction='mean')
+
+            # Calculate the loss
+            limb_loss = mse_loss_fn(y_pred, y_obs)
+
+
+        return limb_loss
+
+class MaskedFDCLoss(BaseLoss):
+    """Flow Duration Curve (FDC) Divergence Loss with Mass Balance Term.
+
+    This loss computes the divergence between observed and predicted flow duration curves (FDCs),
+    normalized by the maximum observed value, and incorporates a mass balance term.
+
+    Parameters
+    ----------
+    cfg : Config
+        The run configuration.
+    """
+
+    def __init__(self, cfg: Config):
+        super(MaskedFDCLoss, self).__init__(cfg, prediction_keys=['y_hat'], ground_truth_keys=['y'])
+
+    def _get_loss(self, prediction: Dict[str, torch.Tensor], ground_truth: Dict[str, torch.Tensor], **kwargs):
+        """
+        Calculate FDC divergence loss with a mass balance term.
+
+        Parameters
+        ----------
+        prediction : Dict[str, torch.Tensor]
+            Predicted discharge values with key 'y_hat'.
+        ground_truth : Dict[str, torch.Tensor]
+            Observed discharge values with key 'y'.
+
+        Returns
+        -------
+        torch.Tensor
+            The combined FDC divergence and mass balance loss.
+        """
+        # Mask NaN values
+        mask = ~torch.isnan(ground_truth['y'])
+        y_pred = prediction['y_hat'][mask].flatten()
+        y_obs = ground_truth['y'][mask].flatten()
+
+        # Sort values in descending order to construct FDCs
+        y_pred_sorted, _ = torch.sort(y_pred, descending=True)
+        y_obs_sorted, _ = torch.sort(y_obs, descending=True)
+
+        # Ensure both FDCs have the same length by trimming
+        min_len = min(len(y_pred_sorted), len(y_obs_sorted))
+        y_pred_sorted = y_pred_sorted[:min_len]
+        y_obs_sorted = y_obs_sorted[:min_len]
+
+        # Compute cross-distribution variability: E[|y - w|]
+        cross_diff = torch.abs(y_obs_sorted[:, None] - y_pred_sorted[None, :])
+        cross_variability = cross_diff.mean()
+
+        # Compute within-distribution variability for y: E[|y - y*|]
+        within_diff_y = torch.abs(y_obs_sorted[:, None] - y_obs_sorted[None, :])
+        within_variability_obs = within_diff_y.mean()
+
+        # Compute within-distribution variability for w: E[|w - w*|]
+        within_diff_w = torch.abs(y_pred_sorted[:, None] - y_pred_sorted[None, :])
+        within_variability_pred = within_diff_w.mean()
+
+        # Compute FDC divergence
+        fdc_divergence = cross_variability - 0.5 * (within_variability_obs + within_variability_pred)
+
+        # Ensure non-negative divergence
+        fdc_loss = torch.clamp(fdc_divergence, min=0.0)
+
+        return fdc_loss
+
+class MaskedSpatialVariogramLoss(BaseLoss):
+    """
+    Spatial Variogram-based Loss Function for Multisite Streamflow Predictions.
+
+    This loss ensures that the **spatial structure** in observed streamflow is preserved in the predictions.
+    Specifically, the pairwise differences between sites in the predictions should match those in the observations.
+
+    Parameters
+    ----------
+    cfg : Config
+        The run configuration.
+    v_order : int, optional (default=2)
+        Order of the variogram (typically 2 for semi-variance).
+    distance_matrix : Optional[torch.Tensor], shape (sites, sites)
+        A predefined distance matrix (optional). If provided, closer sites are
+        weighted more heavily in the loss calculation.
+    """
+
+    def __init__(self, cfg, v_order=2):
+        super(MaskedSpatialVariogramLoss, self).__init__(
+            cfg, prediction_keys=['y_hat'], ground_truth_keys=['y']
+        )
+        self.v_order = v_order  # Power used in variogram (default: 2 for semi-variance)
+        self.distance_matrix = torch.tensor(cfg.distance_matrix.values, dtype=torch.float32)  # Optional weighting for site relationships
+
+    def _get_loss(self, prediction: Dict[str, torch.Tensor], ground_truth: Dict[str, torch.Tensor], **kwargs):
+        """
+        Compute the spatial variogram loss.
+
+        Parameters
+        ----------
+        prediction : Dict[str, torch.Tensor]
+            Predicted discharge values with key 'y_hat' (shape: [batch, sites]).
+        ground_truth : Dict[str, torch.Tensor]
+            Observed discharge values with key 'y' (shape: [batch, sites]).
+
+        Returns
+        -------
+        torch.Tensor
+            The variogram-based loss.
+        """
+        self.distance_matrix = self.distance_matrix.to(ground_truth['y'].device)
+
+        # Mask NaN values
+        mask = ~torch.isnan(ground_truth['y'])
+        y_pred = prediction['y_hat'][mask].reshape(-1, prediction['y_hat'].shape[-1])  # (batch, sites)
+        y_obs = ground_truth['y'][mask].reshape(-1, ground_truth['y'].shape[-1])  # (batch, sites)
+
+        # Compute pairwise differences |yi - yj|^v_order for observed values (spatial differences)
+        diff_obs = torch.abs(y_obs[:, :, None] - y_obs[:, None, :]) ** self.v_order  # (batch, sites, sites)
+
+        # Compute pairwise differences |ŷi - ŷj|^v_order for predicted values (spatial differences)
+        diff_pred = torch.abs(y_pred[:, :, None] - y_pred[:, None, :]) ** self.v_order  # (batch, sites, sites)
+
+        # Compute raw variogram loss (mean squared difference)
+        loss_matrix = (diff_obs - diff_pred) ** 2  # (batch, sites, sites)
+
+        # Apply optional distance-based weighting
+        loss_matrix = loss_matrix * self.distance_matrix  # Weight differences based on site relationships
+
+        # Compute final loss (mean over all site pairs and batches)
+        variogram_loss = torch.mean(loss_matrix)
+
+        return variogram_loss
+
 class MaskedMSELoss(BaseLoss):
     """Mean squared error loss.
 

@@ -284,6 +284,10 @@ class Config(object):
         return self._get_value_verbose("batch_size")
 
     @property
+    def batch_sites(self) -> int:
+        return self._get_value_verbose("batch_sites")
+
+    @property
     def bidirectional_stacked_forecast_lstm(self) -> bool:
         return self._cfg.get("bidirectional_stacked_forecast_lstm", False)
 
@@ -744,6 +748,10 @@ class Config(object):
     @property
     def target_loss_weights(self) -> List[float]:
         return self._cfg.get("target_loss_weights", None)
+
+    @property
+    def rasing_falling_interval(self) -> float:
+        return self._cfg.get("rasing_falling_interval", None)
 
     @property
     def target_noise_std(self) -> float:

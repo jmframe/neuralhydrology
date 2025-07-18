@@ -1,19 +1,19 @@
 # --- Experiment configurations --------------------------------------------------------------------
 
 # experiment name, used as folder name
-experiment_name: nh_AORC_hourly_25yr_seq365_seed101_RFL
+experiment_name: ENSEMBLE_AORC_hourly_jmframetest_RFL2
 seed: 101
 # files to specify training, validation and test basins (relative to code root or absolute path)
-train_basin_file: /media/volume/CAMEL_Far/CAMELS_US/basin_lists/basin_hourly/Train_AORC_SCORING_basin.txt 
-validation_basin_file: /media/volume/CAMEL_Far/CAMELS_US/basin_lists/basin_hourly/Val_AORC_SCORING_basin.txt 
-test_basin_file: /media/volume/CAMEL_Far/CAMELS_US/basin_lists/basin_hourly/Test_AORC_SCORING_basin.txt 
+train_basin_file: /media/volume/CAMEL_Far/CAMELS_US/basin_lists/basin_hourly/20_camels.txt 
+validation_basin_file:  /media/volume/CAMEL_Far/CAMELS_US/basin_lists/basin_hourly/20_camels.txt
+test_basin_file: /media/volume/CAMEL_Far/CAMELS_US/basin_lists/basin_hourly/20_camels.txt
 # training, validation and test time periods (format = 'dd/mm/yyyy')
-train_start_date: "01/10/1998"
-train_end_date: "30/09/2000"
-validation_start_date: "01/10/2003"
-validation_end_date: "30/09/2004"
-test_start_date: "01/10/2005"
-test_end_date: "30/09/2006"
+train_end_date: "30/09/2008"
+train_start_date: "01/10/1999"
+validation_start_date: "01/10/2009"
+validation_end_date: "30/09/2013"
+test_end_date: "30/09/2013"
+test_start_date: "01/10/1980"
 
 # which GPU (id) to use [in format of cuda:0, cuda:1 etc, or cpu or None]
 device: cuda:0
@@ -49,7 +49,7 @@ output_activation: linear
 # ----> General settings <----
 
 # Number of cell states of the LSTM
-hidden_size: 32
+hidden_size: 256 
 
 # Initial bias value of the forget gate
 initial_forget_bias: 3
@@ -74,11 +74,11 @@ learning_rate:
   4: 5e-4
 
 # Mini-batch size
-batch_size: 128
+batch_size: 256 
 batch_sites: 5
 rasing_falling_interval: 6
 # Number of training epochs
-epochs: 9
+epochs: 15
 
 # If a value, clips the gradients during training to that norm.
 clip_gradient_norm: 1
@@ -89,7 +89,7 @@ predict_last_n: 1
 
 # Length of the input sequence
 # If use_frequencies is used, this needs to be a dict mapping each frequency to a seq_length, else an int.
-seq_length: 90
+seq_length: 4380
 
 # Number of parallel workers used in the data pipeline
 num_workers: 16
@@ -122,11 +122,11 @@ forcings:
 dynamic_inputs:
 - APCP_surface
 - TMP_2maboveground
-- DLWRF_surface
-- DSWRF_surface
-- PRES_surface
-- SPFH_2maboveground
-#- UGRD_10maboveground
+  #- DLWRF_surface
+  #- DSWRF_surface
+  #- PRES_surface
+  #- SPFH_2maboveground
+  ##- UGRD_10maboveground
   #- VGRD_10maboveground
 
 static_attributes:
