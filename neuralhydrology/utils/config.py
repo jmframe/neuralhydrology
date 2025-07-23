@@ -921,10 +921,12 @@ class Config(object):
         """Whether to use early stopping. Defaults to False if not set."""
         if self.validate_every == 1:
             return self._cfg.get("early_stopping", False)
-        raise ValueError(
-            "Early stopping can only be used if validation is performed every epoch (validate_every=1). "
-            "Set validate_every=1 in the config to use early stopping."
-        )
+        else:
+            return False
+        # raise ValueError(
+        #     "Early stopping can only be used if validation is performed every epoch (validate_every=1). "
+        #     "Set validate_every=1 in the config to use early stopping."
+        # )
 
     @property
     def patience_early_stopping(self) -> int:
@@ -943,10 +945,12 @@ class Config(object):
         """Whether to use  dynamic learning rate. Defaults to False if not set."""
         if self.validate_every == 1:
             return self._cfg.get("dynamic_learning_rate", False)
-        raise ValueError(
-            "Dynamic learning rate can only be used if validation is performed every epoch (validate_every=1). "
-            "Set validate_every=1 in the config to use dynamic learning rate."
-        )
+        else:
+            return False
+        # raise ValueError(
+        #     "Dynamic learning rate can only be used if validation is performed every epoch (validate_every=1). "
+        #     "Set validate_every=1 in the config to use dynamic learning rate."
+        # )
     
     @property
     def patience_dynamic_learning_rate(self) -> int:
