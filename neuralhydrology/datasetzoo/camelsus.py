@@ -115,7 +115,7 @@ def load_camels_us_attributes(data_dir: Path, basins: List[str] = []) -> pd.Data
         meteorology for large-sample studies, Hydrol. Earth Syst. Sci., 21, 5293-5313, doi:10.5194/hess-21-5293-2017,
         2017.
     """
-    attributes_path = Path(data_dir) / 'camels_attributes_v2.0'
+    attributes_path = Path(data_dir) / 'camels_attributes_v2.0'/ 'Hourly'
 
     if not attributes_path.exists():
         raise RuntimeError(f"Attribute folder not found at {attributes_path}")
