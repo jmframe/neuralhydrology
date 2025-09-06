@@ -121,6 +121,7 @@ class BaseDataset(Dataset):
         self._attributes = {}
         self._y = {}
         self._per_basin_target_stds = {}
+        self._per_basin_target_mads = {}
         self._dates = {}
         self.start_and_end_dates = {}
         self.num_samples = 0
@@ -204,6 +205,8 @@ class BaseDataset(Dataset):
 
         if self._per_basin_target_stds:
             sample['per_basin_target_stds'] = self._per_basin_target_stds[basin]
+        if self._per_basin_target_mads:
+            sample['per_basin_target_mads'] = self._per_basin_target_mads[basin]
         if self.id_to_int:
             sample['x_one_hot'] = torch.nn.functional.one_hot(torch.tensor(self.id_to_int[basin]),
                                                               num_classes=len(self.id_to_int)).to(torch.float32)
@@ -550,6 +553,47 @@ class BaseDataset(Dataset):
             LOGGER.warning("The following basins had not enough valid target values to calculate a standard deviation: "
                            f"{', '.join(nan_basins)}. NSE loss values for this basin will be NaN.")
 
+    def _calculate_per_basin_mad(self, xr: xarray.Dataset):
+        """Compute per-basin MAD for each target variable.
+        Respects cfg.per_basin_mad_type in {"median","mean"} and cfg.per_basin_mad_scale (float).
+        Stores tensors of shape [1, n_targets] in self._per_basin_target_mads[basin].
+        """
+        mad_type = getattr(self.cfg, "per_basin_mad_type", "median").lower()
+        if mad_type not in ("median", "mean"):
+            raise ValueError("cfg.per_basin_mad_type must be 'median' or 'mean'")
+        scale = float(getattr(self.cfg, "per_basin_mad_scale", 1.0))
+
+        if not self._disable_pbar:
+            LOGGER.info(f"Calculating per-basin {mad_type} absolute deviations (scale={scale}).")
+
+        nan_basins = []
+        for basin in tqdm(self.basins, file=sys.stdout, disable=self._disable_pbar):
+            # obs shape: [n_targets, time]
+            obs = xr.sel(basin=basin)[self.cfg.target_variables].to_array().values  # float32
+            # Must have at least 1 valid obs to produce a (non-NaN) MAD
+            if np.sum(~np.isnan(obs)) > 0:
+                if mad_type == "median":
+                    center = np.nanmedian(obs, axis=1, keepdims=True)
+                    mad = np.nanmedian(np.abs(obs - center), axis=1)
+                else:  # mean absolute deviation about the mean
+                    center = np.nanmean(obs, axis=1, keepdims=True)
+                    mad = np.nanmean(np.abs(obs - center), axis=1)
+
+                mad = mad * scale
+                per_basin = torch.tensor(np.expand_dims(mad.astype(np.float32), 0), dtype=torch.float32)
+            else:
+                nan_basins.append(basin)
+                # Shape [1, n_targets] filled with NaN
+                per_basin = torch.full((1, obs.shape[0]), np.nan, dtype=torch.float32)
+
+            self._per_basin_target_mads[basin] = per_basin
+
+        if nan_basins:
+            LOGGER.warning(
+                "The following basins had insufficient valid target data to calculate MAD: "
+                + ", ".join(nan_basins)
+            )
+
     def _create_lookup_table(self, xr: xarray.Dataset):
         lookup = []
         if not self._disable_pbar:
@@ -746,9 +790,16 @@ class BaseDataset(Dataset):
 
         xr = self._load_or_create_xarray_dataset()
 
-        if self.cfg.loss.lower() in ['nse', 'weightednse']:
+        if self.cfg.loss.lower() in ['nse', 'weightednse', 'mnse']:
             # get the std of the discharge for each basin, which is needed for the (weighted) NSE loss.
             self._calculate_per_basin_std(xr)
+            self._calculate_per_basin_mad(xr)
+            mad_path = self.cfg.train_dir / "per_basin_target_mads.p"
+            with mad_path.open("wb") as fp:
+                pickle.dump(self._per_basin_target_mads, fp)
+            std_path = self.cfg.train_dir / "per_basin_target_stds.p"
+            with std_path.open("wb") as fp:
+                pickle.dump(self._per_basin_target_stds, fp)
 
         if self._compute_scaler:
             # get feature-wise center and scale values for the feature normalization
