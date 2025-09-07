@@ -192,6 +192,163 @@ class MaskedMSELoss(BaseLoss):
         loss = 0.5 * torch.mean((prediction['y_hat'][mask] - ground_truth['y'][mask])**2)
         return loss
 
+class MaskedMNSELoss(BaseLoss):
+    """
+    Huber-style 'M-Measure NSE' (MNSE).
+
+    Numerator   : sum_t rho( (y_hat - y) / S )
+    Denominator : sum_t rho( (y - theta) / S )
+    Loss        : mean_over_batch_targets( Numerator / (Denominator + eps) )
+
+    Inputs expected in `data` (all optional except 'y'):
+      - per_basin_target_mads : [bs, 1, n_targets]   # preferred S (from TRAINING)
+      - per_basin_target_stds : [bs, 1, n_targets]   # fallback S (from TRAINING)
+      - per_basin_target_centers : [bs, 1, n_targets]# optional theta (from TRAINING)
+
+    Config knobs (optional):
+      - mnse_huber_k (float, default 1.345)
+      - mnse_eps     (float, default 1e-8)  # stability
+    """
+    def __init__(self, cfg: Config):
+        additional = [
+            # all optional; we subset per-target in _subset_additional_data
+            'per_basin_target_mads',
+            'per_basin_target_stds',
+            'per_basin_target_centers',
+        ]
+        super().__init__(cfg,
+                         prediction_keys=['y_hat'],
+                         ground_truth_keys=['y'],
+                         additional_data=additional)
+        self.k = float(getattr(cfg, 'mnse_huber_k', 1.345))
+        self.eps = float(getattr(cfg, 'mnse_eps', 1e-8))
+
+    def _huber_rho(self, u: torch.Tensor) -> torch.Tensor:
+        # rho(u) = 0.5 u^2                       if |u| <= k
+        #        = k|u| - 0.5 k^2                otherwise
+        absu = torch.abs(u)
+        quad = 0.5 * (u * u)
+        lin  = self.k * absu - 0.5 * (self.k * self.k)
+        return torch.where(absu <= self.k, quad, lin)
+
+    def _choose_scale(self, kwargs: Dict[str, torch.Tensor], y: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        """
+        Returns scale S with shape [bs, 1, targets] (later broadcast to [bs, seq, targets]).
+        Preference: MAD -> STD -> masked-STD(y).
+        """
+        S = None
+        if 'per_basin_target_mads' in kwargs:
+            S = kwargs['per_basin_target_mads']
+        if (S is None or S.numel() == 0) and ('per_basin_target_stds' in kwargs):
+            S = kwargs['per_basin_target_stds']
+        if S is None or S.numel() == 0:
+            # masked per-sample, per-target std over time (fallback)
+            # y: [bs, seq, 1]; mask same shape
+            # compute std across dim=1 with masking
+            with torch.no_grad():
+                bs, seq, _ = y.shape
+                # Avoid degenerate denominators: std >= eps
+                # Compute masked mean then masked variance
+                m = torch.zeros_like(y[:, :1, :])
+                denom = mask.sum(dim=1, keepdim=True).clamp_min(1.0)
+                m = (torch.where(mask, y, torch.zeros_like(y)).sum(dim=1, keepdim=True)) / denom
+                var = (torch.where(mask, (y - m)**2, torch.zeros_like(y)).sum(dim=1, keepdim=True)) / denom
+                std = torch.sqrt(var).clamp_min(self.eps)
+            S = std  # [bs, 1, 1]
+        # ensure at least eps
+        S = torch.clamp(S, min=self.eps)
+        return S  # [bs, 1, targets] or [bs, 1, 1]
+
+    def _choose_center(self, kwargs: Dict[str, torch.Tensor], y: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        """
+        Returns theta with shape [bs, 1, targets]; default masked mean over time.
+        """
+        theta = None
+        if 'per_basin_target_centers' in kwargs:
+            theta = kwargs['per_basin_target_centers']
+        if theta is None or theta.numel() == 0:
+            # masked mean over time
+            denom = mask.sum(dim=1, keepdim=True).clamp_min(1.0)
+            num = torch.where(mask, y, torch.zeros_like(y)).sum(dim=1, keepdim=True)
+            theta = num / denom  # [bs, 1, 1]
+        return theta
+
+    def _expand_to_seq_targets(self, x: torch.Tensor, like: torch.Tensor) -> torch.Tensor:
+        """
+        Expand [bs, 1, targets] or [bs, 1, 1] to match 'like' [bs, seq, targets]
+        """
+        if x.ndim == 2:  # [bs, targets] -> [bs, 1, targets]
+            x = x.unsqueeze(1)
+        bs, seq, tgt = like.shape
+        if x.shape[1] != 1:
+            x = x[:, :1, :]
+        if x.shape[-1] == 1 and tgt > 1:
+            x = x.expand(bs, 1, tgt)
+        return x.expand(bs, seq, x.shape[-1])
+
+    def _get_loss(self, prediction: Dict[str, torch.Tensor], ground_truth: Dict[str, torch.Tensor], **kwargs):
+        # Shapes: y_hat, y: [bs, seq, 1] (after BaseLoss subsetting and per-target slicing)
+        y_hat = prediction['y_hat']
+        y     = ground_truth['y']
+
+        # mask valid y
+        mask = ~torch.isnan(y)
+
+        # choose scale S and center theta
+        S_base = self._choose_scale(kwargs, y, mask)     # [bs, 1, targets] or [bs, 1, 1]
+        theta  = self._choose_center(kwargs, y, mask)    # [bs, 1, targets] or [bs, 1, 1]
+
+        # broadcast S and theta to [bs, seq, targets] (targets==1 here after per-target slice)
+        S     = self._expand_to_seq_targets(S_base, y)
+        theta = self._expand_to_seq_targets(theta, y)
+
+        # residuals and centered obs
+        e = y_hat - y
+        yc = y - theta
+
+        # normalized
+        u_num = e / S
+        u_den = yc / S
+
+        # apply Huber rho
+        rho_num = self._huber_rho(u_num)
+        rho_den = self._huber_rho(u_den)
+
+        # mask out NaNs
+        rho_num = torch.where(mask, rho_num, torch.zeros_like(rho_num))
+        rho_den = torch.where(mask, rho_den, torch.zeros_like(rho_den))
+
+        # sum over time; result shape [bs, targets]
+        num = rho_num.sum(dim=1)                         # [bs, 1]
+        den = rho_den.sum(dim=1).clamp_min(self.eps)     # [bs, 1]
+
+        # ratio per sample, per target
+        ratio = num / den                                # [bs, 1]
+
+        # final loss: mean over batch (and targets, but here targets==1 after slicing)
+        return ratio.mean()
+
+    @staticmethod
+    def _subset_additional_data(additional_data: Dict[str, torch.Tensor], n_target: int) -> Dict[str, torch.Tensor]:
+        """
+        Slice any per-target extras to keep shape [bs, 1, 1] per call.
+        We keep time dimension = 1; we will expand inside the loss to seq length.
+        """
+        out = {}
+        for key, value in additional_data.items():
+            if not isinstance(value, torch.Tensor):
+                continue
+            # accepted shapes:
+            #   [bs, 1, targets]   -> slice targets
+            #   [bs, targets]      -> slice and add singleton time later
+            #   [bs, 1, 1]         -> passthrough
+            if value.ndim == 3 and value.shape[-1] > 1:
+                out[key] = value[:, :, n_target:n_target+1]
+            elif value.ndim == 2 and value.shape[-1] > 1:
+                out[key] = value[:, n_target:n_target+1]  # [bs, 1]
+            else:
+                out[key] = value
+        return out
 
 class MaskedRMSELoss(BaseLoss):
     """Root mean squared error loss.

@@ -261,6 +261,25 @@ class Config(object):
         return cfg
 
     @property
+    def batch_sites(self) -> bool:
+        return self._cfg.get("batch_sites", False)
+
+    @property
+    def mnse_huber_k(self) -> float:
+        return self._cfg.get("mnse_huber_k", 1.0)
+
+    @property
+    def mnse_eps(self) -> float:
+        return self._cfg.get("mnse_eps", 1e-6)
+    @property
+    def per_basin_center_type(self) -> str:
+        return self._cfg.get("per_basin_center_type", "median")
+
+    @property
+    def per_basin_mad_enabled(self) -> bool:
+        return self._cfg.get("per_basin_mad_enabled", False)
+
+    @property
     def additional_feature_files(self) -> List[Path]:
         return self._as_default_list(self._cfg.get("additional_feature_files", None))
 

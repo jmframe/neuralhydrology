@@ -122,6 +122,7 @@ class BaseDataset(Dataset):
         self._y = {}
         self._per_basin_target_stds = {}
         self._per_basin_target_mads = {}
+        self._per_basin_target_centers = {}
         self._dates = {}
         self.start_and_end_dates = {}
         self.num_samples = 0
@@ -207,6 +208,8 @@ class BaseDataset(Dataset):
             sample['per_basin_target_stds'] = self._per_basin_target_stds[basin]
         if self._per_basin_target_mads:
             sample['per_basin_target_mads'] = self._per_basin_target_mads[basin]
+        if self._per_basin_target_centers:
+            sample['per_basin_target_centers'] = self._per_basin_target_centers[basin]
         if self.id_to_int:
             sample['x_one_hot'] = torch.nn.functional.one_hot(torch.tensor(self.id_to_int[basin]),
                                                               num_classes=len(self.id_to_int)).to(torch.float32)
@@ -594,6 +597,37 @@ class BaseDataset(Dataset):
                 + ", ".join(nan_basins)
             )
 
+    def _calculate_per_basin_center(self, xr: xarray.Dataset):
+        """Compute per-basin center (mean or median) for each target variable."""
+        center_type = getattr(self.cfg, "per_basin_center_type", "mean").lower()
+        if center_type not in ("mean", "median"):
+            raise ValueError("cfg.per_basin_center_type must be 'mean' or 'median'")
+
+        if not self._disable_pbar:
+            LOGGER.info(f"Calculating per-basin {center_type} for target variables.")
+
+        nan_basins = []
+        for basin in tqdm(self.basins, file=sys.stdout, disable=self._disable_pbar):
+            obs = xr.sel(basin=basin)[self.cfg.target_variables].to_array().values  # shape: [n_targets, time]
+            if np.sum(~np.isnan(obs)) > 0:
+                if center_type == "median":
+                    center = np.nanmedian(obs, axis=1)
+                else:
+                    center = np.nanmean(obs, axis=1)
+
+                per_basin = torch.tensor(np.expand_dims(center.astype(np.float32), 0), dtype=torch.float32)
+            else:
+                nan_basins.append(basin)
+                per_basin = torch.full((1, obs.shape[0]), np.nan, dtype=torch.float32)
+
+            self._per_basin_target_centers[basin] = per_basin
+
+        if nan_basins:
+            LOGGER.warning(
+                "The following basins had insufficient valid target data to calculate center: "
+                + ", ".join(nan_basins)
+            )
+
     def _create_lookup_table(self, xr: xarray.Dataset):
         lookup = []
         if not self._disable_pbar:
@@ -794,12 +828,16 @@ class BaseDataset(Dataset):
             # get the std of the discharge for each basin, which is needed for the (weighted) NSE loss.
             self._calculate_per_basin_std(xr)
             self._calculate_per_basin_mad(xr)
+            self._calculate_per_basin_center(xr)
             mad_path = self.cfg.train_dir / "per_basin_target_mads.p"
             with mad_path.open("wb") as fp:
                 pickle.dump(self._per_basin_target_mads, fp)
             std_path = self.cfg.train_dir / "per_basin_target_stds.p"
             with std_path.open("wb") as fp:
                 pickle.dump(self._per_basin_target_stds, fp)
+            center_path = self.cfg.train_dir / "per_basin_target_centers.p"
+            with center_path.open("wb") as fp:
+                pickle.dump(self._per_basin_target_centers, fp)
 
         if self._compute_scaler:
             # get feature-wise center and scale values for the feature normalization

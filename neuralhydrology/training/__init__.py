@@ -54,7 +54,9 @@ def get_loss_obj(cfg: Config) -> loss.BaseLoss:
         A new loss instance that implements the loss specified in the config or, if different, the loss required by the 
         head.
     """
-    if cfg.loss.lower() == "mse":
+    if cfg.loss.lower() == "mnse":
+        loss_obj = loss.MaskedMNSELoss(cfg)
+    elif cfg.loss.lower() == "mse":
         loss_obj = loss.MaskedMSELoss(cfg)
     elif cfg.loss.lower() == "nse":
         loss_obj = loss.MaskedNSELoss(cfg)
