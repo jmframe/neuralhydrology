@@ -825,19 +825,26 @@ class BaseDataset(Dataset):
         xr = self._load_or_create_xarray_dataset()
 
         if self.cfg.loss.lower() in ['nse', 'weightednse', 'mnse']:
-            # get the std of the discharge for each basin, which is needed for the (weighted) NSE loss.
+            # calculate stats for this period
             self._calculate_per_basin_std(xr)
             self._calculate_per_basin_mad(xr)
             self._calculate_per_basin_center(xr)
-            mad_path = self.cfg.train_dir / "per_basin_target_mads.p"
-            with mad_path.open("wb") as fp:
-                pickle.dump(self._per_basin_target_mads, fp)
-            std_path = self.cfg.train_dir / "per_basin_target_stds.p"
-            with std_path.open("wb") as fp:
-                pickle.dump(self._per_basin_target_stds, fp)
-            center_path = self.cfg.train_dir / "per_basin_target_centers.p"
-            with center_path.open("wb") as fp:
-                pickle.dump(self._per_basin_target_centers, fp)
+
+            yaml = YAML()
+            yaml.default_flow_style = False
+
+            # append the period name (train/validation/test) into the filenames
+            mad_path = self.cfg.train_dir / f"per_basin_target_mads_{self.period}.yml"
+            with mad_path.open("w") as fp:
+                yaml.dump({k: v.tolist() for k, v in self._per_basin_target_mads.items()}, fp)
+
+            std_path = self.cfg.train_dir / f"per_basin_target_stds_{self.period}.yml"
+            with std_path.open("w") as fp:
+                yaml.dump({k: v.tolist() for k, v in self._per_basin_target_stds.items()}, fp)
+
+            center_path = self.cfg.train_dir / f"per_basin_target_centers_{self.period}.yml"
+            with center_path.open("w") as fp:
+                yaml.dump({k: v.tolist() for k, v in self._per_basin_target_centers.items()}, fp)
 
         if self._compute_scaler:
             # get feature-wise center and scale values for the feature normalization
