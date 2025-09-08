@@ -1,0 +1,78 @@
+allow_subsequent_nan_losses: 999
+batch_size: 512
+clip_gradient_norm: 1
+clip_targets_to_zero:
+- QObs(mm/d)
+data_dir: /mnt/d/nh/CAMELS_US
+dataset: camels_us
+device: cuda:0
+dynamic_inputs:
+- PRCP(mm/day)_nldas
+- SRAD(W/m2)_nldas
+- Tmax(C)_nldas
+- Tmin(C)_nldas
+- Vp(Pa)_nldas
+- prcp(mm/day)_daymet
+- srad(W/m2)_daymet
+- tmax(C)_daymet
+- tmin(C)_daymet
+- vp(Pa)_daymet
+epochs: 15
+experiment_name: huber_robust_nse
+forcings:
+- nldas
+- daymet
+head: regression
+hidden_size: 128
+initial_forget_bias: 3
+learning_rate:
+  0: 0.001
+  2: 0.0008
+  4: 0.0006
+  6: 0.0004
+  8: 0.0002
+log_interval: 5
+log_n_figures: 1
+log_tensorboard: false
+loss: mnse
+per_basin_mad_enabled: true
+per_basin_center_type: median
+mnse_huber_k: 1.4826
+mnse_eps: 1e-5
+metrics:
+- NSE
+- KGE
+model: cudalstm
+num_workers: 8
+optimizer: Adam
+output_activation: linear
+output_dropout: 0.4
+predict_last_n: 1
+save_weights_every: 5
+seed: 999
+seq_length: 365
+target_variables:
+- QObs(mm/d)
+test_basin_file: /mnt/d/nh/CAMELS_US/basin_lists/list_530_camels_basins_NoLeaf.txt
+test_end_date: 30/09/2014
+test_start_date: 01/10/1980
+train_basin_file: /mnt/d/nh/CAMELS_US/basin_lists/list_530_camels_basins_NoLeaf.txt
+train_end_date: 30/09/2008
+train_start_date: 01/10/1999
+validate_every: 5
+validate_n_random_basins: 530
+validation_basin_file: /mnt/d/nh/CAMELS_US/basin_lists/list_530_camels_basins_NoLeaf.txt
+validation_end_date: 30/09/1989
+validation_start_date: 01/10/1980
+static_attributes:
+- elev_mean
+- slope_mean
+- frac_forest
+- soil_porosity
+- geol_permeability
+- frac_snow
+statics_embedding:
+  type: fc
+  hiddens:
+  - 32
+  activation: tanh
