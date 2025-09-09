@@ -535,6 +535,27 @@ class BaseDataset(Dataset):
         with file_path.open("wb") as fp:
             pickle.dump(xr.to_dict(), fp)
 
+    def _load_period_stats(self, period_label: str = "train"):
+        """Load per-basin stats (MAD/STD/center) saved for a given period label."""
+        yaml = YAML(typ="safe")
+        def _load_one(kind: str, target_dict: dict):
+            p = self.cfg.train_dir / f"per_basin_target_{kind}_{period_label}.yml"
+            if not p.exists():
+                LOGGER.warning(f"Stats file not found: {p}. Will compute on-the-fly.")
+                return False
+            with p.open("r") as fp:
+                raw = yaml.load(fp) or {}
+            # raw maps basin -> nested lists from v.tolist() (shape [1, n_targets])
+            for b, arr in raw.items():
+                v = torch.tensor(arr, dtype=torch.float32)
+                target_dict[b] = v
+            return True
+
+        ok_mad = _load_one("mads", self._per_basin_target_mads)
+        ok_std = _load_one("stds", self._per_basin_target_stds)
+        ok_ctr = _load_one("centers", self._per_basin_target_centers)
+        return ok_mad and ok_std and ok_ctr
+
     def _calculate_per_basin_std(self, xr: xarray.Dataset):
         basin_coordinates = xr["basin"].values.tolist()
         if not self._disable_pbar:
@@ -825,26 +846,35 @@ class BaseDataset(Dataset):
         xr = self._load_or_create_xarray_dataset()
 
         if self.cfg.loss.lower() in ['nse', 'weightednse', 'mnse']:
-            # calculate stats for this period
-            self._calculate_per_basin_std(xr)
-            self._calculate_per_basin_mad(xr)
-            self._calculate_per_basin_center(xr)
+            if self.period == 'train':
+                # === compute once from TRAIN and save ===
+                self._calculate_per_basin_std(xr)
+                self._calculate_per_basin_mad(xr)
+                self._calculate_per_basin_center(xr)
 
-            yaml = YAML()
-            yaml.default_flow_style = False
+                yaml = YAML()
+                yaml.default_flow_style = False
 
-            # append the period name (train/validation/test) into the filenames
-            mad_path = self.cfg.train_dir / f"per_basin_target_mads_{self.period}.yml"
-            with mad_path.open("w") as fp:
-                yaml.dump({k: v.tolist() for k, v in self._per_basin_target_mads.items()}, fp)
+                mad_path = self.cfg.train_dir / "per_basin_target_mads_train.yml"
+                with mad_path.open("w") as fp:
+                    yaml.dump({k: v.tolist() for k, v in self._per_basin_target_mads.items()}, fp)
 
-            std_path = self.cfg.train_dir / f"per_basin_target_stds_{self.period}.yml"
-            with std_path.open("w") as fp:
-                yaml.dump({k: v.tolist() for k, v in self._per_basin_target_stds.items()}, fp)
+                std_path = self.cfg.train_dir / "per_basin_target_stds_train.yml"
+                with std_path.open("w") as fp:
+                    yaml.dump({k: v.tolist() for k, v in self._per_basin_target_stds.items()}, fp)
 
-            center_path = self.cfg.train_dir / f"per_basin_target_centers_{self.period}.yml"
-            with center_path.open("w") as fp:
-                yaml.dump({k: v.tolist() for k, v in self._per_basin_target_centers.items()}, fp)
+                center_path = self.cfg.train_dir / "per_basin_target_centers_train.yml"
+                with center_path.open("w") as fp:
+                    yaml.dump({k: v.tolist() for k, v in self._per_basin_target_centers.items()}, fp)
+
+            else:
+                # === eval periods: load TRAIN stats; fallback to compute if missing ===
+                loaded = self._load_period_stats(period_label="train")
+                if not loaded:
+                    LOGGER.warning("Falling back to computing stats for this period (no train stats found).")
+                    self._calculate_per_basin_std(xr)
+                    self._calculate_per_basin_mad(xr)
+                    self._calculate_per_basin_center(xr)
 
         if self._compute_scaler:
             # get feature-wise center and scale values for the feature normalization
