@@ -271,7 +271,7 @@ def load_hourly_us_stage(data_dir: Path, basin: str) -> pd.Series:
                      index_col=['datetime'],
                      parse_dates=['datetime'],
                      usecols=['datetime', 'gauge_height_ft'])
-    df = df.resample('H').mean()
+    df = df.resample('h').mean()
     df["gauge_height_m"] = df["gauge_height_ft"] * 0.3048
 
     return df["gauge_height_m"]
