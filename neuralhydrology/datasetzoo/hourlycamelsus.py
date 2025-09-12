@@ -74,7 +74,7 @@ class HourlyCamelsUS(camelsus.CamelsUS):
             else:
                 # load daily CAMELS forcings and upsample to hourly
                 df, _ = camelsus.load_camels_us_forcings(self.cfg.data_dir, basin, forcing)
-                df = df.resample('1H').ffill()
+                df = df.resample('1h').ffill()
             if len(self.cfg.forcings) > 1:
                 # rename columns
                 df = df.rename(columns={col: f"{col}_{forcing}" for col in df.columns if 'qobs' not in col.lower()})
@@ -94,7 +94,7 @@ class HourlyCamelsUS(camelsus.CamelsUS):
             # add daily discharge from CAMELS, using daymet to get basin area
             _, area = camelsus.load_camels_us_forcings(self.cfg.data_dir, basin, "daymet")
             discharge = camelsus.load_camels_us_discharge(self.cfg.data_dir, basin, area)
-            discharge = discharge.resample('1H').ffill()
+            discharge = discharge.resample('1h').ffill()
             df["QObs(mm/d)"] = discharge
 
         # only warn for missing netcdf files once for each forcing product
@@ -171,6 +171,7 @@ def load_hourly_us_forcings(data_dir: Path, basin: str, forcings: str) -> pd.Dat
         Path to the CAMELS US directory. This folder must contain an 'hourly' folder containing one subdirectory
         for each forcing, which contains the forcing files (.csv) for each basin. Files have to contain the 8-digit 
         basin id.
+        If using AORC forcing data, add these to the 'hourly' folder: https://doi.org/10.4211/hs.c738c05278a34bc9848dd14d61cffab9
     basin : str
         8-digit USGS identifier of the basin.
     forcings : str
@@ -195,7 +196,6 @@ def load_hourly_us_forcings(data_dir: Path, basin: str, forcings: str) -> pd.Dat
     # Handle different header types for NLDAS and AORC
     if forcings == 'nldas_hourly':
         df = pd.read_csv(file_path, index_col=['date'], parse_dates=['date'])
-        df.rename(columns={'date': 'date'}, inplace=True)
     elif forcings == 'aorc_hourly':
         df = pd.read_csv(file_path, index_col='time', parse_dates=['time'])
         df.index = df.index.floor('s')  # Adjust precision to seconds
