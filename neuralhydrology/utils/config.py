@@ -986,15 +986,15 @@ class Config(object):
 
     @property
     def xlstm_num_blocks(self) -> int:
-        return self._cfg.get("xlstm_num_blocks", 1)
+        return self._cfg.get("xlstm_num_blocks", 2)
     
     @property
     def xlstm_slstm_at(self) -> List[int]:
-        return self._as_default_list(self._cfg.get("xlstm_slstm_at", [0]))
+        return self._as_default_list(self._cfg.get("xlstm_slstm_at", [1]))
     
     @property
     def xlstm_heads(self) -> int:
-        return self._cfg.get("xlstm_heads", 2)
+        return self._cfg.get("xlstm_heads", 1)
     
     @property
     def xlstm_kernel_size(self) -> int:

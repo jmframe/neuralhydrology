@@ -208,9 +208,9 @@ The ``xlstm`` package is the required dependency for XLSTM.
 
 There are five hyperparameters which can be set in the config file:
 
-* ``xlstm_num_blocks``: number of stacked xLSTM blocks (Default is set to 1)
-* ``xlstm_slstm_at``: indices of blocks of scalar-memory (Default is set to position [0])
-* ``xlstm_heads``: number of heads (Default is set to 2)
+* ``xlstm_num_blocks``: number of stacked xLSTM blocks (Default is set to 2)
+* ``xlstm_slstm_at``: indices of blocks of scalar-memory (Default is set to position [1])
+* ``xlstm_heads``: number of heads (Default is set to 1)
 * ``xlstm_kernel_size``: convolutional kernel size (Default is set to 4)
 * ``xlstm_proj_factor``: projection factor (Default is set to 1.3)
 

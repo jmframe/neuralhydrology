@@ -91,7 +91,7 @@ class XLSTM(BaseModel):
                     act_fn="gelu",
                 ),
             ),
-            context_length = cfg.seq_length, 
+            context_length = self._as_int(cfg.seq_length),
             num_blocks = cfg.xlstm_num_blocks,
             embedding_dim = cfg.hidden_size,      
             slstm_at = cfg.xlstm_slstm_at,
